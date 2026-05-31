@@ -91,6 +91,9 @@ type Config struct {
 	TelemetryEnabled bool `json:"telemetry_enabled,omitempty"`
 	// TelemetryEndpoint is an optional OTLP exporter URL.
 	TelemetryEndpoint string `json:"telemetry_endpoint,omitempty"`
+	// TelemetrySampleRate is the fraction of high-frequency trace events to emit [0.0, 1.0].
+	// 1.0 emits all events (default); 0.1 emits ~10%; 0.0 disables trace event telemetry.
+	TelemetrySampleRate float64 `json:"telemetry_sample_rate,omitempty"`
 	// MaxTraceDepth is the maximum depth of the call tree before it is truncated.
 	MaxTraceDepth int `json:"max_trace_depth,omitempty"`
 	// FailureThreshold is the number of failures before the circuit breaker opens.
@@ -114,17 +117,18 @@ var validLogLevels = map[string]bool{
 }
 
 var defaultConfig = &Config{
-	RpcUrl:           endpoints.SorobanTestnet,
-	Network:          NetworkTestnet,
-	SimulatorPath:    "",
-	LogLevel:         "info",
-	CachePath:        joinPath(os.ExpandEnv("$HOME"), ".Glassbox", "cache"),
-	RequestTimeout:   defaultRequestTimeout,
-	TelemetryEnabled: false,
-	MaxCacheSize:     0,
-	MaxTraceDepth:    50,
-	FailureThreshold: defaultFailureThreshold,
-	RetryTimeout:     defaultRetryTimeout,
+	RpcUrl:              endpoints.SorobanTestnet,
+	Network:             NetworkTestnet,
+	SimulatorPath:       "",
+	LogLevel:            "info",
+	CachePath:           joinPath(os.ExpandEnv("$HOME"), ".Glassbox", "cache"),
+	RequestTimeout:      defaultRequestTimeout,
+	TelemetryEnabled:    false,
+	TelemetrySampleRate: 1.0,
+	MaxCacheSize:        0,
+	MaxTraceDepth:       50,
+	FailureThreshold:    defaultFailureThreshold,
+	RetryTimeout:        defaultRetryTimeout,
 }
 
 // -- Core Functions --
@@ -385,6 +389,11 @@ func (envParser) Parse(cfg *Config) error {
 	if v := os.Getenv("GLASSBOX_TELEMETRY_ENDPOINT"); v != "" {
 		cfg.TelemetryEndpoint = v
 	}
+	if v := os.Getenv("GLASSBOX_TELEMETRY_SAMPLE_RATE"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.TelemetrySampleRate = f
+		}
+	}
 	return nil
 }
 
@@ -427,5 +436,8 @@ func (configDefaultsAssigner) Apply(cfg *Config) {
 	}
 	if cfg.Telemetry && !cfg.TelemetryAnonymizedConfigured {
 		cfg.TelemetryAnonymized = defaultConfig.TelemetryAnonymized
+	}
+	if cfg.TelemetrySampleRate == 0 {
+		cfg.TelemetrySampleRate = defaultConfig.TelemetrySampleRate
 	}
 }
