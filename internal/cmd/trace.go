@@ -39,13 +39,27 @@ The trace viewer allows you to:
 - View memory and host state changes
 
 Use --print for a one-shot, colour-coded ASCII tree report suitable for CI
-logs or piping to other tools. Add --no-color to disable ANSI colours.
+logs or piping to other tools. Add --no-color to disable ANSI colours.`,
+	Example: `  # Open the interactive trace viewer
+  glassbox trace execution.json
 
-Example:
-  Glassbox trace execution.json
-  Glassbox trace --file debug_trace.json
-  Glassbox trace --print execution.json
-  Glassbox trace --print --no-color execution.json | less`,
+  # Load a trace via the --file flag
+  glassbox trace --file debug_trace.json
+
+  # Print a colour-coded ASCII tree and exit (suitable for CI logs)
+  glassbox trace --print execution.json
+
+  # Print without ANSI colours (pipe-friendly)
+  glassbox trace --print --no-color execution.json | less
+
+  # Force dark-mode colour palette
+  glassbox trace --theme dark execution.json
+
+  # Export trace as deterministic JSON for diffing or archiving
+  glassbox trace --output-json trace_export.json execution.json
+
+  # Export call graph as SVG
+  glassbox trace --export-svg callgraph.svg execution.json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Apply theme if specified, otherwise auto-detect
@@ -141,7 +155,7 @@ Example:
 
 func init() {
 	traceCmd.Flags().StringVarP(&traceFile, "file", "f", "", "Trace file to load")
-	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, deuteranopia, protanopia, tritanopia, high-contrast)")
+	traceCmd.Flags().StringVar(&traceThemeFlag, "theme", "", "Color theme (default, dark, light, deuteranopia, protanopia, tritanopia, high-contrast)")
 	traceCmd.Flags().BoolVar(&tracePrint, "print", false, "Print a rich ASCII tree report and exit (non-interactive)")
 	traceCmd.Flags().BoolVar(&traceNoColor, "no-color", false, "Disable ANSI colour output (also honoured via NO_COLOR env var)")
 	traceCmd.Flags().StringVar(&traceExportSVG, "export-svg", "", "Export call graph as SVG to specified file")
