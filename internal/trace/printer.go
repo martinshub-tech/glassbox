@@ -30,6 +30,9 @@ type PrintOptions struct {
 
 	// Output is the writer to send the report to. nil defaults to os.Stdout.
 	Output io.Writer
+
+	// Verbosity controls how much detail is printed per step.
+	Verbosity Verbosity
 }
 
 func (o PrintOptions) writer() io.Writer {
@@ -128,6 +131,10 @@ func newPalette(noColor bool) palette {
 //
 // Supports --no-color and responds to terminal width.
 func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
+	if opts.Verbosity == 0 {
+		opts.Verbosity = VerbosityNormal
+	}
+	t = FilterExecutionTrace(t, opts.Verbosity)
 	p := newPalette(opts.NoColor)
 	out := opts.writer()
 	maxW := opts.maxWidth()

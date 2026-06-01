@@ -24,6 +24,7 @@ var (
 	traceOutputJSON  string
 	traceExportPath   string
 	traceExportFormat string
+	traceVerbosity    string
 )
 
 var traceCmd = &cobra.Command{
@@ -80,10 +81,17 @@ Example:
 			return errors.WrapUnmarshalFailed(err, "trace")
 		}
 
+		verbosity, err := trace.ParseVerbosity(traceVerbosity)
+		if err != nil {
+			return errors.WrapValidationError(err.Error())
+		}
+		executionTrace = trace.FilterExecutionTrace(executionTrace, verbosity)
+
 		// --print: render a rich ASCII tree report then exit (non-interactive)
 		if tracePrint {
 			opts := trace.PrintOptions{
-				NoColor: traceNoColor,
+				NoColor:   traceNoColor,
+				Verbosity: verbosity,
 			}
 			trace.PrintExecutionTrace(executionTrace, opts)
 			return nil
@@ -146,6 +154,8 @@ func init() {
 	traceCmd.Flags().BoolVar(&traceNoColor, "no-color", false, "Disable ANSI colour output (also honoured via NO_COLOR env var)")
 	traceCmd.Flags().StringVar(&traceExportSVG, "export-svg", "", "Export call graph as SVG to specified file")
 	traceCmd.Flags().StringVar(&traceOutputJSON, "output-json", "", "Export trace as deterministic JSON to specified file (includes schema_version)")
+	traceCmd.Flags().StringVar(&traceVerbosity, "trace-verbosity", "normal",
+		"Trace detail level: summary, normal, or verbose")
 
 	_ = traceCmd.RegisterFlagCompletionFunc("theme", completeThemeFlag)
 

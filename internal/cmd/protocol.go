@@ -4,11 +4,11 @@
 package cmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 
+	"github.com/dotandev/glassbox/internal/clioutput"
 	"github.com/dotandev/glassbox/internal/protocolreg"
 	"github.com/spf13/cobra"
 )
@@ -162,9 +162,7 @@ Exit codes:
 		report := registrar.Diagnose()
 
 		if protocolDiagnoseJSON {
-			enc := json.NewEncoder(cmd.OutOrStdout())
-			enc.SetIndent("", "  ")
-			return enc.Encode(report)
+			return clioutput.Write(cmd.OutOrStdout(), "protocol:diagnose", report)
 		}
 
 		for _, check := range report.Checks {

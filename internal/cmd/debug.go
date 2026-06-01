@@ -20,6 +20,7 @@ import (
 	"github.com/dotandev/glassbox/internal/config"
 	"github.com/dotandev/glassbox/internal/decenstorage"
 	"github.com/dotandev/glassbox/internal/decoder"
+	"github.com/dotandev/glassbox/internal/clioutput"
 	"github.com/dotandev/glassbox/internal/errors"
 	"github.com/dotandev/glassbox/internal/logger"
 	"github.com/dotandev/glassbox/internal/lto"
@@ -30,6 +31,8 @@ import (
 	"github.com/dotandev/glassbox/internal/simulator"
 	"github.com/dotandev/glassbox/internal/snapshot"
 	"github.com/dotandev/glassbox/internal/telemetry"
+	"github.com/dotandev/glassbox/internal/trace"
+	"github.com/dotandev/glassbox/internal/trace"
 	"github.com/dotandev/glassbox/internal/tokenflow"
 	simtypes "github.com/dotandev/glassbox/internal/types"
 	"github.com/dotandev/glassbox/internal/version"
@@ -83,6 +86,10 @@ var (
 	saveSnapshotsFlag    string
 	wasmBase64           string
 	contractSourceFlag   string
+	debugJSONFlag        bool
+	debugFormatFlag      string
+	skipSourceMappingFlag bool
+	traceVerbosityFlag   string
 )
 
 // DebugCommand holds dependencies for the debug command
@@ -612,6 +619,7 @@ Local WASM Replay Mode:
 					simReq.ProtocolVersion = &protocolVersionFlag
 					fmt.Printf("Using protocol version override: %d\n", protocolVersionFlag)
 				}
+				applyDebugSimulationOptions(simReq)
 				applySimulationFeeMocks(simReq)
 
 				simResp, err = runner.Run(ctx, simReq)
@@ -663,6 +671,7 @@ Local WASM Replay Mode:
 						Timestamp:       ts,
 						EnableSnapshots: snapshotsFlag,
 					}
+					applyDebugSimulationOptions(primaryReq)
 					applySimulationFeeMocks(primaryReq)
 					primaryResult, primaryErr = runner.Run(ctx, primaryReq)
 				}()
@@ -709,6 +718,7 @@ Local WASM Replay Mode:
 						Timestamp:       ts,
 						EnableSnapshots: snapshotsFlag,
 					}
+					applyDebugSimulationOptions(compareReq)
 					applySimulationFeeMocks(compareReq)
 					compareResult, compareErr = runner.Run(ctx, compareReq)
 				}()
@@ -845,6 +855,7 @@ Local WASM Replay Mode:
 			ResultMetaXdr:   resp.ResultMetaXdr,
 			EnableSnapshots: snapshotsFlag,
 		}
+		applyDebugSimulationOptions(simReq)
 		applySimulationFeeMocks(simReq)
 		simReqJSON, err := json.Marshal(simReq)
 		if err != nil {
@@ -995,12 +1006,14 @@ func newLocalWasmSimulationRequest(forceNoCache bool) *simulator.SimulationReque
 		WasmPath:        &wasmPath,
 		NoCache:         noCacheFlag || forceNoCache,
 		MockArgs:        &args,
-		ContractWasm:    &wasmBase64, // Pass the WASM binary for source mapping
-		EnableSnapshots: snapshotsFlag,
+		ContractWasm:        &wasmBase64, // Pass the WASM binary for source mapping
+		EnableSnapshots:     snapshotsFlag,
+		SkipSourceMapping:   skipSourceMappingFlag,
 	}
 	if contractSourceFlag != "" {
 		req.ContractSourcePath = &contractSourceFlag
 	}
+	applyDebugSimulationOptions(req)
 	applySimulationFeeMocks(req)
 	return req
 }
@@ -1323,6 +1336,25 @@ func collectContractIDsFromDiagnosticEvents(events []simulator.DiagnosticEvent) 
 }
 
 func printSimulationResult(network string, res *simulator.SimulationResponse) {
+	if clioutput.WantsJSON(debugJSONFlag, debugFormatFlag) {
+		payload := map[string]interface{}{
+			"network": network,
+			"result":  res,
+		}
+		if traceVerbosityFlag != "" {
+			if v, err := trace.ParseVerbosity(traceVerbosityFlag); err == nil {
+				payload["verbosity"] = traceVerbosityFlag
+				if res != nil {
+					filtered := *res
+					filtered.DiagnosticEvents = trace.FilterDiagnosticEvents(res.DiagnosticEvents, v)
+					payload["result"] = &filtered
+				}
+			}
+		}
+		_ = clioutput.WriteStdout("debug", payload)
+		return
+	}
+
 	// Section header
 	sep := strings.Repeat("─", 60)
 	fmt.Printf("\n%s\n", visualizer.Colorize("  "+sep, "dim"))
@@ -1799,6 +1831,16 @@ func collectVisibleSections(resp *simulator.SimulationResponse, findings []secur
 	return sections
 }
 
+func applyDebugSimulationOptions(req *simulator.SimulationRequest) {
+	if req == nil {
+		return
+	}
+	req.SkipSourceMapping = skipSourceMappingFlag
+	if contractSourceFlag != "" {
+		req.ContractSourcePath = &contractSourceFlag
+	}
+}
+
 func applySimulationFeeMocks(req *simulator.SimulationRequest) {
 	if req == nil {
 		return
@@ -1880,6 +1922,7 @@ func runFromRegistry(ctx context.Context, path string) error {
 			LedgerEntries: entry.Snapshot.ToMap(),
 			Timestamp:     entry.Timestamp,
 		}
+		applyDebugSimulationOptions(simReq)
 		applySimulationFeeMocks(simReq)
 
 		simResp, err := runner.Run(ctx, simReq)
@@ -1933,6 +1976,10 @@ func init() {
 	debugCmd.Flags().StringVar(&loadSnapshotsFlag, "load-snapshots", "", "Load simulation from a snapshot registry")
 	debugCmd.Flags().StringVar(&saveSnapshotsFlag, "save-snapshots", "", "Save simulation results to a snapshot registry")
 	debugCmd.Flags().StringVar(&contractSourceFlag, "contract-source", "", "Explicit path to contract source directory for source mapping (used when auto-discovery fails)")
+	debugCmd.Flags().BoolVar(&debugJSONFlag, "json", false, "Output simulation results as machine-readable JSON")
+	debugCmd.Flags().StringVar(&debugFormatFlag, "format", "text", "Output format: text or json")
+	debugCmd.Flags().BoolVar(&skipSourceMappingFlag, "skip-source-mapping", false, "Skip DWARF source mapping for faster raw trace replay")
+	debugCmd.Flags().StringVar(&traceVerbosityFlag, "trace-verbosity", "normal", "Trace detail level: summary, normal, or verbose")
 	rootCmd.AddCommand(debugCmd)
 }
 

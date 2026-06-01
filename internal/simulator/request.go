@@ -35,6 +35,8 @@ type SimulationRequest struct {
 	// ContractSourcePath is an explicit path to the contract source directory
 	// for source mapping. Used when auto-discovery fails (Issue #117).
 	ContractSourcePath *string `json:"contract_source_path,omitempty"`
+	// SkipSourceMapping bypasses DWARF parsing and Git link generation for faster raw replay.
+	SkipSourceMapping bool `json:"skip_source_mapping,omitempty"`
 }
 
 type ResourceCalibration struct {

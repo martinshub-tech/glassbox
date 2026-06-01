@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dotandev/glassbox/internal/clioutput"
 	"github.com/dotandev/glassbox/internal/errors"
 	"github.com/dotandev/glassbox/internal/signer"
 	"github.com/spf13/cobra"
@@ -46,6 +47,7 @@ var (
 	auditSignPKCS11TokenLabel string
 	auditSignPKCS11KeyLabel   string
 	auditSignPKCS11KeyIDHex   string
+	auditSignJSONFlag         bool
 )
 
 // SignedAuditLog is the JSON output produced by audit:sign.
@@ -136,6 +138,8 @@ func init() {
 		"PKCS#11 key CKA_ID in hex (overrides GLASSBOX_PKCS11_KEY_ID)")
 	auditSignCmd.Flags().BoolVar(&auditSignValidateOnly, "validate-only", false,
 		"Run PKCS#11 preflight checks and exit without signing")
+	auditSignCmd.Flags().BoolVar(&auditSignJSONFlag, "json", false,
+		"Wrap signed audit log output in a schema-versioned JSON envelope")
 
 	rootCmd.AddCommand(auditSignCmd)
 }
@@ -200,6 +204,10 @@ func runAuditSign(cmd *cobra.Command, args []string) error {
 		PublicKey: hex.EncodeToString(publicKey),
 		Provider:  providerName,
 		Payload:   json.RawMessage(payloadBytes),
+	}
+
+	if auditSignJSONFlag {
+		return clioutput.Write(cmd.OutOrStdout(), "audit:sign", auditLog)
 	}
 
 	output, err := json.MarshalIndent(auditLog, "", "  ")
