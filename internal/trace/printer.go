@@ -33,6 +33,10 @@ type PrintOptions struct {
 
 	// EventSchemas optionally decodes diagnostic contract events for printing.
 	EventSchemas *EventSchemaSet
+
+	// Verbosity controls how much trace detail is printed.
+	// 0 (zero value) is treated as VerbosityNormal.
+	Verbosity Verbosity
 }
 
 func (o PrintOptions) writer() io.Writer {
@@ -130,6 +134,9 @@ func newPalette(noColor bool) palette {
 // highlighted in green and errors in red.
 //
 // Supports --no-color and responds to terminal width.
+//
+// When the trace contains no states PrintExecutionTrace prints a clear
+// diagnostic message rather than an empty or misleading header.
 func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 	if opts.Verbosity == 0 {
 		opts.Verbosity = VerbosityNormal
@@ -140,6 +147,30 @@ func PrintExecutionTrace(t *ExecutionTrace, opts PrintOptions) {
 	maxW := opts.maxWidth()
 
 	sep := strings.Repeat("─", maxW)
+
+	// ── guard: nil or empty trace ─────────────────────────────────────────────
+	if t == nil {
+		_, _ = fmt.Fprintln(out)
+		_, _ = p.errorFn.Fprintln(out, " [FAIL] Execution trace is nil — no trace data to display.")
+		_, _ = fmt.Fprintln(out, " This is an internal error. Please report it at https://github.com/dotandev/glassbox/issues")
+		_, _ = fmt.Fprintln(out)
+		return
+	}
+
+	if len(t.States) == 0 {
+		_, _ = fmt.Fprintln(out)
+		_, _ = p.header.Fprintln(out, " Transaction Execution Trace")
+		_, _ = fmt.Fprintf(out, " Hash  : %s\n", truncateHash(t.TransactionHash, maxW-10))
+		_, _ = p.separator.Fprintln(out, sep)
+		_, _ = p.errorFn.Fprintln(out, " No execution steps were recorded for this transaction.")
+		_, _ = fmt.Fprintln(out, " Possible causes:")
+		_, _ = fmt.Fprintln(out, "   • The simulator did not produce diagnostic events (check --snapshots flag)")
+		_, _ = fmt.Fprintln(out, "   • The transaction does not contain InvokeHostFunction operations")
+		_, _ = fmt.Fprintln(out, "   • The simulator binary may be outdated (run 'glassbox doctor --fix')")
+		_, _ = p.separator.Fprintln(out, sep)
+		_, _ = fmt.Fprintln(out)
+		return
+	}
 
 	// ── header ───────────────────────────────────────────────────────────────
 	_, _ = fmt.Fprintln(out)

@@ -368,6 +368,13 @@ Local WASM Replay Mode:
 			}
 		}
 
+		// Validate trace export path sanity when --trace-output is provided.
+		if traceOutputFile != "" {
+			if err := trace.ValidateTraceInputs(traceVerbosityFlag, "", "", traceOutputFile); err != nil {
+				return errors.WrapValidationError(err.Error())
+			}
+		}
+
 		// Validate --theme when set explicitly.
 		if cmd.Flags().Changed("theme") && themeFlag != "" {
 			validThemes := map[string]bool{
@@ -768,9 +775,39 @@ Local WASM Replay Mode:
 			if compareNetworkFlag == "" {
 				// Single Network Run
 				if snapshotFlag != "" {
-					snap, err := snapshot.Load(snapshotFlag)
-					if err != nil {
-						return errors.WrapValidationError(fmt.Sprintf("failed to load snapshot: %v", err))
+					snap, driftWarn, loadErr := snapshot.LoadWithDiagnostics(snapshotFlag)
+					if loadErr != nil {
+						return errors.WrapValidationError(fmt.Sprintf("failed to load snapshot: %v", loadErr))
+					}
+					// Surface drift as a prominent warning — the user should be
+					// aware that the ledger state may not match what was originally
+					// captured.
+					if driftWarn != nil {
+						fmt.Fprintf(os.Stderr, "\nWarning: %s\n\n", driftWarn.Error())
+					}
+					// Validate the snapshot identity and freshness before replay.
+					currentParams := map[string]string{
+						"network": networkFlag,
+						"tx":      txHash,
+					}
+					currentSourceHash := ""
+					if wasmPath != "" {
+						if wasmBytes, rerr := os.ReadFile(wasmPath); rerr == nil {
+							currentSourceHash = snapshot.HashWasmSource(wasmBytes)
+						}
+					}
+					// We load the persisted form for identity/staleness checks.
+					// If the file is a plain ledger-state JSON (not a PersistedSnapshot),
+					// LoadPersisted will fail gracefully and we skip the identity checks.
+					if ps, psErr := snapshot.LoadPersisted(snapshotFlag); psErr == nil {
+						if valErr := snapshot.ValidateSnapshotBeforeReplay(
+							ps, txHash, networkFlag, currentParams, currentSourceHash,
+						); valErr != nil {
+							return errors.WrapValidationError(fmt.Sprintf(
+								"snapshot failed pre-replay validation: %v\n"+
+									"Use 'glassbox snapshot load --path %s' to inspect the snapshot details",
+								valErr, snapshotFlag))
+						}
 					}
 					ledgerEntries = snap.ToMap()
 					fmt.Printf("Loaded %d ledger entries from snapshot\n", len(ledgerEntries))
@@ -845,6 +882,20 @@ Local WASM Replay Mode:
 				}
 				printSimulationResult(networkFlag, simResp)
 				// Budget usage is already rendered inside printSimulationResult; skip duplicate block.
+
+				// Surface a diagnostic when the simulator returned no trace events — this
+				// is actionable: users should check their simulator version or the
+				// transaction envelope.
+				if simResp != nil && len(simResp.DiagnosticEvents) == 0 && len(simResp.Events) == 0 {
+					fmt.Fprintf(os.Stderr,
+						"\nNote: the simulator did not produce any diagnostic events for this transaction.\n"+
+							"Trace accuracy may be limited. Check that:\n"+
+							"  • The simulator binary is up-to-date (run 'glassbox doctor --fix')\n"+
+							"  • The transaction includes InvokeHostFunction operations\n"+
+							"  • The transaction envelope is valid and not malformed\n"+
+							"  • The --snapshots flag is set if per-step snapshot data is needed\n",
+					)
+				}
 
 				// Render colored before/after ledger state diff.
 				if postState, diffErr := rpc.ExtractPostStateLedgerEntries(resp.ResultMetaXdr); diffErr == nil {

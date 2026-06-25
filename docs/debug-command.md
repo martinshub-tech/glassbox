@@ -89,6 +89,31 @@ Dry-run FAILED: 2 validation error(s)
 
 ---
 
+## Snapshot Reliability
+
+When `--snapshot` is used, Glassbox performs a pre-flight validation of the snapshot file **before** any simulation begins:
+
+1. **Fingerprint integrity** — the ledger state fingerprint is recomputed and compared to the stored value. A mismatch means the file was modified after it was saved and produces a blocking error with a remediation hint.
+2. **Identity checks** — when a transaction hash and network are known, the snapshot is confirmed to belong to the same transaction and network. A mismatch produces a clear error naming both the stored and expected values.
+3. **Staleness detection** — the snapshot's parameter fingerprint is compared against the current CLI flags (`--network`, `--tx`). A mismatch surfaces a "snapshot is stale" error with the specific reason (changed parameters or changed WASM source hash).
+4. **Drift warning** — if a plain ledger-state JSON file was modified after its fingerprint was written, a prominent warning is printed to stderr before replay continues. This is non-blocking but visible.
+
+**Error examples:**
+
+```
+Error: snapshot failed pre-replay validation: snapshot fingerprint mismatch: stored=abc... computed=def...
+The ledger state appears to have been modified after the snapshot was saved.
+Re-run the debug command to regenerate a valid snapshot
+Use 'glassbox snapshot load --path ./snap.json' to inspect the snapshot details
+
+Error: snapshot failed pre-replay validation: snapshot network mismatch: snapshot was captured on "mainnet" but replay is targeting "testnet"
+Re-run the debug command with --network testnet to capture a matching snapshot
+```
+
+Use `glassbox snapshot load --path <file> --verify` to inspect a snapshot before using it in replay.
+
+---
+
 ## Local Replay Modes
 
 ### WASM replay (no network required)
@@ -289,6 +314,11 @@ The debug command returns explicit, actionable errors for all common failure mod
 | Simulator not found | `simulator binary not found` — run `glassbox doctor --fix` |
 | Simulation failure | `simulation execution failed: <detail>` — check the diagnostic section of the output |
 | No simulation results | `no simulation results generated` — indicates an internal logic error |
+| Snapshot fingerprint mismatch | `snapshot fingerprint mismatch: stored=… computed=…` — re-run the debug command to regenerate the snapshot |
+| Snapshot tx hash mismatch | `snapshot tx hash mismatch: snapshot contains tx=… but replay requested tx=…` |
+| Snapshot network mismatch | `snapshot network mismatch: snapshot was captured on "…" but replay is targeting "…"` |
+| Snapshot is stale | `snapshot is stale: CLI parameters have changed since the snapshot was saved` — regenerate with the current flags |
+| Empty trace (no events) | A note is printed to stderr explaining possible causes and suggesting `glassbox doctor --fix` |
 
 For environment setup problems, run `glassbox doctor` for a comprehensive health check.
 
