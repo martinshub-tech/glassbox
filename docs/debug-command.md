@@ -57,10 +57,14 @@ glassbox debug --load-snapshots <registry-file>
 1. Transaction hash format (64 hex chars)
 2. Network name validity (`testnet`, `mainnet`, `futurenet`, or a custom network defined in config)
 3. Compare-network name validity (when `--compare-network` is set)
-4. RPC endpoint reachability (health check with a 10-second timeout; empty health status is treated as a failure)
-5. Simulator binary presence and version compatibility
+4. Compare-network distinctness (must differ from primary network)
+5. RPC URL format validation (when `--rpc-url` is provided)
+6. RPC endpoint reachability (health check with a 10-second timeout; empty health status is treated as a failure)
+7. Simulator binary presence and version compatibility
+8. Protocol version compatibility (when `--protocol-version` is set)
+9. Trace output configuration validation (when `--trace-output` is provided)
 
-Each check prints `[OK]` or `[FAIL]` on its own line. On failure the output ends with a numbered list of all failures so you can address them in one pass.
+Each check prints `[OK]` or `[FAIL]` on its own line with detailed remediation guidance. On failure the output ends with a numbered list of all failures so you can address them in one pass.
 
 **Example output:**
 
@@ -73,18 +77,35 @@ glassbox debug --dry-run --network testnet 5c0a1234...ef7890ab
 [OK]   RPC endpoint reachable (status: healthy)
 [OK]   Simulator binary found: /usr/local/bin/glassbox-sim
        Version: 1.2.3
+       Version compatibility: OK
+
+Additional environment checks:
+[OK]   Trace output configuration is valid: ./traces/debug.html
 
 Dry-run PASSED: all checks succeeded for transaction 5c0a1234... on testnet
 
-# Multiple failures:
-glassbox debug --dry-run --network badnet tooshort
+You can now run the full debug command by removing the --dry-run flag.
 
-[FAIL] Invalid transaction hash format: …
-[FAIL] Invalid network: badnet (expected testnet, mainnet, or futurenet)
+# Multiple failures with detailed remediation:
+glassbox debug --dry-run --network badnet --compare-network badnet tooshort
 
-Dry-run FAILED: 2 validation error(s)
-  1. transaction hash: …
+[FAIL] Invalid transaction hash format: expected 64 hexadecimal characters
+       Fix: transaction hashes must be 64 lowercase hexadecimal characters
+       Example: 5c0a1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab
+[FAIL] Invalid network "badnet" — must be testnet, mainnet, futurenet, or a custom network defined in config
+       Fix: use --network testnet, --network mainnet, or --network futurenet
+       Or define a custom network in glassbox.toml under [networks]
+[FAIL] --compare-network must be different from --network; both are "badnet"
+       Fix: select a different network for --compare-network to enable cross-network comparison
+       Example: --network testnet --compare-network mainnet
+
+Dry-run FAILED: 3 validation error(s)
+  1. transaction hash: expected 64 hexadecimal characters
   2. network: invalid network "badnet"
+  3. compare-network: cannot be the same as primary network "badnet"
+
+Recommendation: Fix all errors listed above before executing the debug command.
+For comprehensive diagnostics, run: glassbox doctor
 ```
 
 **Exit code:** `0` on pass, `1` on any validation failure.

@@ -5,6 +5,7 @@ package trace
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"os"
@@ -173,9 +174,16 @@ func ExportExecutionTrace(trace *ExecutionTrace, format string, outputPath strin
 }
 
 func ExportExecutionTraceWithOptions(trace *ExecutionTrace, format string, outputPath string, opts ExportOptions) error {
-	if trace == nil {
-		return fmt.Errorf("trace is nil")
+	// Comprehensive pre-flight validation
+	if err := ValidateTraceExportParams(trace, format, outputPath, opts); err != nil {
+		return fmt.Errorf("trace export validation failed: %w", err)
 	}
+	
+	// Format compatibility check
+	if err := ValidateTraceFormatCompatibility(trace, format); err != nil {
+		return fmt.Errorf("trace format compatibility check failed: %w", err)
+	}
+	
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "" {
 		format = "html"
@@ -186,19 +194,57 @@ func ExportExecutionTraceWithOptions(trace *ExecutionTrace, format string, outpu
 	switch format {
 	case "html":
 		content, err = GenerateTraceHTMLWithOptions(trace, opts)
+		if err != nil {
+			return fmt.Errorf("failed to generate HTML trace: %w\n"+
+				"  This may indicate invalid trace data or a template rendering error\n"+
+				"  Check that all trace fields are properly populated", err)
+		}
 	case "markdown", "md":
 		content, err = GenerateTraceMarkdownWithOptions(trace, opts)
+		if err != nil {
+			return fmt.Errorf("failed to generate Markdown trace: %w\n"+
+				"  This may indicate invalid trace data or a template rendering error", err)
+		}
+	case "json":
+		// For JSON, we marshal the trace directly
+		jsonBytes, jsonErr := json.MarshalIndent(trace, "", "  ")
+		if jsonErr != nil {
+			return fmt.Errorf("failed to marshal trace as JSON: %w\n"+
+				"  This indicates the trace contains non-serializable data\n"+
+				"  Check for circular references or invalid field values", jsonErr)
+		}
+		content = string(jsonBytes)
+	case "text":
+		content, err = GenerateTracePlainText(trace)
+		if err != nil {
+			return fmt.Errorf("failed to generate plain text trace: %w", err)
+		}
 	default:
-		return fmt.Errorf("unsupported trace export format: %s", format)
+		return fmt.Errorf("unsupported trace export format: %s\n"+
+			"  Supported formats: html, markdown, json, text\n"+
+			"  Fix: use --format with one of the supported values", format)
 	}
 	if err != nil {
 		return err
 	}
 
+	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
-		return fmt.Errorf("failed to create trace export directory: %w", err)
+		return fmt.Errorf("failed to create trace export directory: %w\n"+
+			"  Directory: %s\n"+
+			"  Fix: ensure you have write permissions to the parent directory\n"+
+			"  Or choose a different output path with --trace-output", err, filepath.Dir(outputPath))
 	}
-	return os.WriteFile(outputPath, []byte(content), 0o644)
+	
+	// Write the file
+	if err := os.WriteFile(outputPath, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("failed to write trace export file: %w\n"+
+			"  Path: %s\n"+
+			"  Fix: ensure you have write permissions and sufficient disk space\n"+
+			"  Check: ls -la %s", err, outputPath, filepath.Dir(outputPath))
+	}
+	
+	return nil
 }
 
 func GenerateTraceHTML(trace *ExecutionTrace) (string, error) {

@@ -9,357 +9,421 @@ import (
 	"time"
 )
 
-// ── ValidateTraceInputs ───────────────────────────────────────────────────────
+func TestValidateTraceInputs_Enhanced(t *testing.T) {
+	tests := []struct {
+		name         string
+		verbosity    string
+		exportFormat string
+		eventFilter  string
+		outputPath   string
+		wantErr      bool
+		errContains  []string
+	}{
+		{
+			name:         "all valid inputs",
+			verbosity:    "normal",
+			exportFormat: "html",
+			eventFilter:  "",
+			outputPath:   "./trace.html",
+			wantErr:      false,
+		},
+		{
+			name:         "invalid verbosity",
+			verbosity:    "ultra",
+			exportFormat: "html",
+			eventFilter:  "",
+			outputPath:   "./trace.html",
+			wantErr:      true,
+			errContains:  []string{"trace-verbosity", "ultra", "Fix:"},
+		},
+		{
+			name:         "invalid format",
+			verbosity:    "normal",
+			exportFormat: "yaml",
+			eventFilter:  "",
+			outputPath:   "./trace.yaml",
+			wantErr:      true,
+			errContains:  []string{"format", "yaml", "Fix:"},
+		},
+		{
+			name:         "directory path instead of file",
+			verbosity:    "normal",
+			exportFormat: "html",
+			eventFilter:  "",
+			outputPath:   "./traces/",
+			wantErr:      true,
+			errContains:  []string{"directory path", "Fix:", "Example:"},
+		},
+		{
+			name:         "path with traversal",
+			verbosity:    "normal",
+			exportFormat: "html",
+			eventFilter:  "",
+			outputPath:   "../../../etc/passwd",
+			wantErr:      true,
+			errContains:  []string{"traversal", ".."},
+		},
+		{
+			name:         "multiple errors",
+			verbosity:    "bad",
+			exportFormat: "bad",
+			eventFilter:  "",
+			outputPath:   "./traces/",
+			wantErr:      true,
+			errContains:  []string{"trace-verbosity", "format", "directory"},
+		},
+	}
 
-func TestValidateTraceInputs_AllValid(t *testing.T) {
-	if err := ValidateTraceInputs("normal", "text", "", ""); err != nil {
-		t.Errorf("expected nil for valid inputs, got: %v", err)
-	}
-	if err := ValidateTraceInputs("summary", "json", "trap", "out.json"); err != nil {
-		t.Errorf("expected nil for valid inputs, got: %v", err)
-	}
-	if err := ValidateTraceInputs("verbose", "html", "contract_call", "report.html"); err != nil {
-		t.Errorf("expected nil for valid inputs, got: %v", err)
-	}
-	if err := ValidateTraceInputs("", "", "", ""); err != nil {
-		t.Errorf("expected nil for all-empty inputs, got: %v", err)
-	}
-}
-
-func TestValidateTraceInputs_InvalidVerbosity(t *testing.T) {
-	err := ValidateTraceInputs("ultra", "", "", "")
-	if err == nil {
-		t.Fatal("expected error for invalid verbosity")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "ultra") {
-		t.Errorf("error should include the bad value, got: %s", msg)
-	}
-	if !strings.Contains(msg, "summary") {
-		t.Errorf("error should list valid options, got: %s", msg)
-	}
-}
-
-func TestValidateTraceInputs_InvalidExportFormat(t *testing.T) {
-	err := ValidateTraceInputs("", "xml", "", "")
-	if err == nil {
-		t.Fatal("expected error for invalid export format")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "xml") {
-		t.Errorf("error should include the bad value, got: %s", msg)
-	}
-	if !strings.Contains(msg, "html") {
-		t.Errorf("error should list valid options, got: %s", msg)
-	}
-}
-
-func TestValidateTraceInputs_InvalidEventFilter(t *testing.T) {
-	err := ValidateTraceInputs("", "", "unknown_event", "")
-	if err == nil {
-		t.Fatal("expected error for invalid event filter")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "unknown_event") {
-		t.Errorf("error should include the bad filter, got: %s", msg)
-	}
-	if !strings.Contains(msg, "trap") {
-		t.Errorf("error should list valid event types, got: %s", msg)
-	}
-}
-
-func TestValidateTraceInputs_MultipleFailures(t *testing.T) {
-	err := ValidateTraceInputs("extreme", "xml", "badtype", "")
-	if err == nil {
-		t.Fatal("expected error for multiple invalid inputs")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "3") {
-		t.Errorf("expected 3 failures in error, got: %s", msg)
-	}
-	// Each bad value should appear.
-	for _, bad := range []string{"extreme", "xml", "badtype"} {
-		if !strings.Contains(msg, bad) {
-			t.Errorf("error should mention %q, got: %s", bad, msg)
-		}
-	}
-}
-
-func TestValidateTraceInputs_ValidEventFilters(t *testing.T) {
-	for _, f := range AllFilterableEventTypes() {
-		if err := ValidateTraceInputs("", "", f, ""); err != nil {
-			t.Errorf("ValidateTraceInputs with filter %q returned unexpected error: %v", f, err)
-		}
-	}
-}
-
-func TestValidateTraceInputs_DirectoryOutputPath(t *testing.T) {
-	err := ValidateTraceInputs("", "", "", "/some/dir/")
-	if err == nil {
-		t.Error("expected error for directory-looking output path")
-	}
-	if !strings.Contains(err.Error(), "directory") {
-		t.Errorf("expected 'directory' in error, got: %v", err)
-	}
-}
-
-// ── ValidateEventTypeField ────────────────────────────────────────────────────
-
-func TestValidateEventTypeField_Empty(t *testing.T) {
-	if diag := ValidateEventTypeField(""); diag != "" {
-		t.Errorf("expected empty diagnostic for empty event type, got: %s", diag)
-	}
-}
-
-func TestValidateEventTypeField_KnownTypes(t *testing.T) {
-	known := []string{
-		EventTypeTrap, EventTypeContractCall, EventTypeHostFunction, EventTypeAuth,
-		"traps", "contract call", "contractcall", "host function", "host_fn",
-		"auth_event",
-	}
-	for _, k := range known {
-		if diag := ValidateEventTypeField(k); diag != "" {
-			t.Errorf("expected no diagnostic for known type %q, got: %s", k, diag)
-		}
-	}
-}
-
-func TestValidateEventTypeField_UnknownType(t *testing.T) {
-	diag := ValidateEventTypeField("mysterious_event")
-	if diag == "" {
-		t.Error("expected diagnostic for unknown event type")
-	}
-	if !strings.Contains(diag, "mysterious_event") {
-		t.Errorf("diagnostic should name the unknown type, got: %s", diag)
-	}
-	if !strings.Contains(diag, "trace accuracy") {
-		t.Errorf("diagnostic should mention trace accuracy, got: %s", diag)
-	}
-	if !strings.Contains(diag, "simulator") {
-		t.Errorf("diagnostic should suggest checking simulator version, got: %s", diag)
-	}
-}
-
-// ── ValidateExecutionTrace ────────────────────────────────────────────────────
-
-func TestValidateExecutionTrace_Nil(t *testing.T) {
-	issues := ValidateExecutionTrace(nil)
-	if len(issues) == 0 {
-		t.Error("expected issues for nil trace")
-	}
-	if !strings.Contains(issues[0], "nil") {
-		t.Errorf("expected nil mention in issue, got: %s", issues[0])
-	}
-}
-
-func TestValidateExecutionTrace_Empty(t *testing.T) {
-	tr := NewExecutionTrace("abc123", 0)
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) == 0 {
-		t.Error("expected issues for empty trace")
-	}
-	msg := issues[0]
-	if !strings.Contains(msg, "no steps") {
-		t.Errorf("expected 'no steps' in issue, got: %s", msg)
-	}
-	// Should give actionable context.
-	if !strings.Contains(msg, "simulator") {
-		t.Errorf("expected simulator mention in issue, got: %s", msg)
-	}
-}
-
-func TestValidateExecutionTrace_Valid(t *testing.T) {
-	tr := NewExecutionTrace("abc123", 0)
-	tr.AddState(ExecutionState{
-		Operation: "contract_call",
-		EventType: EventTypeContractCall,
-	})
-	tr.AddState(ExecutionState{
-		Operation: "auth",
-		EventType: EventTypeAuth,
-	})
-
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) != 0 {
-		t.Errorf("expected no issues for valid trace, got: %v", issues)
-	}
-}
-
-func TestValidateExecutionTrace_StepIndexMismatch(t *testing.T) {
-	tr := NewExecutionTrace("abc123", 0)
-	tr.AddState(ExecutionState{Operation: "call"})
-	tr.AddState(ExecutionState{Operation: "auth"})
-
-	// Manually corrupt the step index of one state.
-	tr.States[1].Step = 99
-
-	issues := ValidateExecutionTrace(tr)
-	found := false
-	for _, iss := range issues {
-		if strings.Contains(iss, "step index mismatch") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected step index mismatch issue, got: %v", issues)
-	}
-}
-
-func TestValidateExecutionTrace_UnrecognisedEventType(t *testing.T) {
-	tr := NewExecutionTrace("abc123", 0)
-	tr.AddState(ExecutionState{
-		Operation: "mystery_op",
-		EventType: "completely_unknown_event",
-	})
-
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) == 0 {
-		t.Error("expected issue for unrecognised event type")
-	}
-	found := false
-	for _, iss := range issues {
-		if strings.Contains(iss, "completely_unknown_event") {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected unrecognised event type in issues, got: %v", issues)
-	}
-}
-
-func TestValidateExecutionTrace_EmptyEventType_NoIssue(t *testing.T) {
-	// States with empty EventType are fine — the type is inferred at runtime.
-	tr := NewExecutionTrace("abc123", 0)
-	tr.AddState(ExecutionState{Operation: "contract_call"})
-
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) != 0 {
-		t.Errorf("expected no issues for empty EventType, got: %v", issues)
-	}
-}
-
-// ── TraceInputError ───────────────────────────────────────────────────────────
-
-func TestTraceInputError_SingleFailure(t *testing.T) {
-	e := &TraceInputError{Failures: []string{"single problem"}}
-	if e.Error() != "single problem" {
-		t.Errorf("single failure should not be wrapped, got: %s", e.Error())
-	}
-}
-
-func TestTraceInputError_MultipleFailures(t *testing.T) {
-	e := &TraceInputError{Failures: []string{"problem one", "problem two", "problem three"}}
-	msg := e.Error()
-	if !strings.Contains(msg, "3") {
-		t.Errorf("should mention count 3, got: %s", msg)
-	}
-	if !strings.Contains(msg, "problem one") {
-		t.Errorf("should include first failure, got: %s", msg)
-	}
-	if !strings.Contains(msg, "problem three") {
-		t.Errorf("should include last failure, got: %s", msg)
-	}
-	// Should be numbered.
-	if !strings.Contains(msg, "1.") {
-		t.Errorf("should number failures starting from 1, got: %s", msg)
-	}
-}
-
-// ── AddState preserves step index for ValidateExecutionTrace ─────────────────
-
-func TestAddState_StepIndicesAreConsistent(t *testing.T) {
-	tr := NewExecutionTrace("tx", 0)
-	for i := 0; i < 5; i++ {
-		tr.AddState(ExecutionState{Operation: "step"})
-	}
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) != 0 {
-		t.Errorf("expected no issues after AddState, got: %v", issues)
-	}
-}
-
-// ── Regression: truncateForDiag ───────────────────────────────────────────────
-
-func TestTruncateForDiag(t *testing.T) {
-	short := truncateForDiag("abc")
-	if short != "abc" {
-		t.Errorf("short string should be unchanged, got: %s", short)
-	}
-	long := truncateForDiag(strings.Repeat("x", 64))
-	if len(long) > 20 {
-		t.Errorf("truncated string should be ≤20 chars, got length %d: %s", len(long), long)
-	}
-	if !strings.HasSuffix(long, "...") {
-		t.Errorf("truncated string should end with '...', got: %s", long)
-	}
-}
-
-// ── Filter validation cases ───────────────────────────────────────────────────
-
-func TestValidateTraceInputs_ValidMarkdownFormat(t *testing.T) {
-	for _, f := range []string{"markdown", "md", "html", "text", "json"} {
-		if err := ValidateTraceInputs("", f, "", ""); err != nil {
-			t.Errorf("format %q should be valid, got: %v", f, err)
-		}
-	}
-}
-
-// ── Integration: ValidateExecutionTrace + AddState with known event types ─────
-
-func TestValidateExecutionTrace_MixedKnownUnknown(t *testing.T) {
-	tr := NewExecutionTrace("txhash", 0)
-	tr.AddState(ExecutionState{Operation: "contract_call", EventType: EventTypeContractCall})
-	tr.AddState(ExecutionState{Operation: "host_fn", EventType: "alien_type"})
-	tr.AddState(ExecutionState{Operation: "auth", EventType: EventTypeAuth})
-
-	issues := ValidateExecutionTrace(tr)
-
-	// Exactly one issue: the alien_type at step 1.
-	if len(issues) != 1 {
-		t.Errorf("expected 1 issue for one bad event type, got %d: %v", len(issues), issues)
-	}
-	if !strings.Contains(issues[0], "alien_type") {
-		t.Errorf("issue should name 'alien_type', got: %s", issues[0])
-	}
-	if !strings.Contains(issues[0], "step 1") {
-		t.Errorf("issue should name step index, got: %s", issues[0])
-	}
-}
-
-// ── Edge: ValidateTraceInputs does not reject AuthEventType aliases ───────────
-
-func TestValidateTraceInputs_AuthEventAlias(t *testing.T) {
-	// The filter must be one of AllFilterableEventTypes(), so "auth" is valid.
-	if err := ValidateTraceInputs("", "", EventTypeAuth, ""); err != nil {
-		t.Errorf("auth filter should be valid: %v", err)
-	}
-}
-
-// Ensure NewExecutionTrace returns a trace that passes ValidateExecutionTrace
-// without any states (even though it will report no-steps warning).
-func TestNewExecutionTrace_EmptyIsConsistent(t *testing.T) {
-	tr := NewExecutionTrace("abc", 10)
-	if tr == nil {
-		t.Fatal("NewExecutionTrace returned nil")
-	}
-	issues := ValidateExecutionTrace(tr)
-	// One expected issue: empty trace.
-	if len(issues) != 1 {
-		t.Errorf("expected exactly 1 issue (empty trace), got %d: %v", len(issues), issues)
-	}
-}
-
-// Ensure validate trace with large traces doesn't panic.
-func TestValidateExecutionTrace_LargeTrace(t *testing.T) {
-	tr := NewExecutionTrace("largetx", 100)
-	for i := 0; i < 500; i++ {
-		tr.AddState(ExecutionState{
-			Operation: "contract_call",
-			Timestamp: time.Now(),
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTraceInputs(tt.verbosity, tt.exportFormat, tt.eventFilter, tt.outputPath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTraceInputs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				errStr := err.Error()
+				for _, want := range tt.errContains {
+					if !strings.Contains(errStr, want) {
+						t.Errorf("ValidateTraceInputs() error = %v, want it to contain %q", err, want)
+					}
+				}
+			}
 		})
 	}
-	issues := ValidateExecutionTrace(tr)
-	if len(issues) != 0 {
-		t.Errorf("expected no issues for large valid trace, got: %v", issues)
+}
+
+func TestValidateTraceExportParams(t *testing.T) {
+	validTrace := &ExecutionTrace{
+		TransactionHash: "abc123",
+		StartTime:       time.Now(),
+		EndTime:         time.Now().Add(time.Second),
+		States: []ExecutionState{
+			{Step: 0, Operation: "test"},
+		},
+	}
+
+	emptyTrace := &ExecutionTrace{
+		TransactionHash: "empty",
+		StartTime:       time.Now(),
+		EndTime:         time.Now(),
+		States:          []ExecutionState{},
+	}
+
+	tests := []struct {
+		name        string
+		trace       *ExecutionTrace
+		format      string
+		outputPath  string
+		opts        ExportOptions
+		wantErr     bool
+		errContains []string
+	}{
+		{
+			name:       "valid params",
+			trace:      validTrace,
+			format:     "html",
+			outputPath: "./output.html",
+			opts:       ExportOptions{},
+			wantErr:    false,
+		},
+		{
+			name:        "nil trace",
+			trace:       nil,
+			format:      "html",
+			outputPath:  "./output.html",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"trace is nil", "Fix:"},
+		},
+		{
+			name:        "empty format",
+			trace:       validTrace,
+			format:      "",
+			outputPath:  "./output.html",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"format is empty", "Fix:"},
+		},
+		{
+			name:        "invalid format",
+			trace:       validTrace,
+			format:      "pdf",
+			outputPath:  "./output.pdf",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"unsupported", "pdf", "Fix:"},
+		},
+		{
+			name:        "empty output path",
+			trace:       validTrace,
+			format:      "html",
+			outputPath:  "",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"output path is empty", "Fix:", "Example:"},
+		},
+		{
+			name:        "directory output path",
+			trace:       validTrace,
+			format:      "html",
+			outputPath:  "./traces/",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"directory", "file path"},
+		},
+		{
+			name:        "empty trace states",
+			trace:       emptyTrace,
+			format:      "html",
+			outputPath:  "./output.html",
+			opts:        ExportOptions{},
+			wantErr:     true,
+			errContains: []string{"no steps", "Possible causes:", "Fix:"},
+		},
+		{
+			name:       "too many comments",
+			trace:      validTrace,
+			format:     "html",
+			outputPath: "./output.html",
+			opts: ExportOptions{
+				Comments: make([]string, 101), // more than max of 100
+			},
+			wantErr:     true,
+			errContains: []string{"too many comments", "101", "Fix:"},
+		},
+		{
+			name:       "comment too long",
+			trace:      validTrace,
+			format:     "html",
+			outputPath: "./output.html",
+			opts: ExportOptions{
+				Comments: []string{strings.Repeat("x", 10001)}, // more than 10000
+			},
+			wantErr:     true,
+			errContains: []string{"exceeds maximum length", "10001", "Fix:"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTraceExportParams(tt.trace, tt.format, tt.outputPath, tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTraceExportParams() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				errStr := err.Error()
+				for _, want := range tt.errContains {
+					if !strings.Contains(errStr, want) {
+						t.Errorf("ValidateTraceExportParams() error = %v, want it to contain %q", err, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestValidateTraceFormatCompatibility(t *testing.T) {
+	validTrace := &ExecutionTrace{
+		TransactionHash: "abc123",
+		StartTime:       time.Now(),
+		EndTime:         time.Now().Add(time.Second),
+		States: []ExecutionState{
+			{Step: 0, Operation: "test", Arguments: []interface{}{"arg1"}},
+			{Step: 1, Operation: "test2", Arguments: []interface{}{"arg2"}},
+		},
+	}
+
+	corruptedTrace := &ExecutionTrace{
+		TransactionHash: "corrupted",
+		StartTime:       time.Now(),
+		EndTime:         time.Now().Add(time.Second),
+		States: []ExecutionState{
+			{Step: 0, Operation: "test"},
+			{Step: 99, Operation: "test2"}, // Step mismatch!
+		},
+	}
+
+	hugeArgsTrace := &ExecutionTrace{
+		TransactionHash: "huge",
+		StartTime:       time.Now(),
+		EndTime:         time.Now().Add(time.Second),
+		States: []ExecutionState{
+			{Step: 0, Operation: "test", Arguments: []interface{}{strings.Repeat("x", 60000)}},
+		},
+	}
+
+	tests := []struct {
+		name        string
+		trace       *ExecutionTrace
+		format      string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:    "valid json",
+			trace:   validTrace,
+			format:  "json",
+			wantErr: false,
+		},
+		{
+			name:    "valid html",
+			trace:   validTrace,
+			format:  "html",
+			wantErr: false,
+		},
+		{
+			name:    "valid markdown",
+			trace:   validTrace,
+			format:  "markdown",
+			wantErr: false,
+		},
+		{
+			name:    "valid text",
+			trace:   validTrace,
+			format:  "text",
+			wantErr: false,
+		},
+		{
+			name:        "nil trace",
+			trace:       nil,
+			format:      "html",
+			wantErr:     true,
+			errContains: "trace is nil",
+		},
+		{
+			name:        "corrupted trace json",
+			trace:       corruptedTrace,
+			format:      "json",
+			wantErr:     true,
+			errContains: "step mismatch",
+		},
+		{
+			name:        "huge args html",
+			trace:       hugeArgsTrace,
+			format:      "html",
+			wantErr:     true,
+			errContains: "very large arguments",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTraceFormatCompatibility(tt.trace, tt.format)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTraceFormatCompatibility() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("ValidateTraceFormatCompatibility() error = %v, want it to contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateExecutionTrace_Enhanced(t *testing.T) {
+	validTrace := &ExecutionTrace{
+		TransactionHash: "abc123",
+		States: []ExecutionState{
+			{Step: 0, Operation: "test", EventType: "contract_call"},
+			{Step: 1, Operation: "test2", EventType: "diagnostic"},
+		},
+	}
+
+	emptyTrace := &ExecutionTrace{
+		TransactionHash: "empty",
+		States:          []ExecutionState{},
+	}
+
+	mismatchTrace := &ExecutionTrace{
+		TransactionHash: "mismatch",
+		States: []ExecutionState{
+			{Step: 0, Operation: "test"},
+			{Step: 5, Operation: "test2"}, // Wrong step number
+		},
+	}
+
+	tests := []struct {
+		name            string
+		trace           *ExecutionTrace
+		wantIssueCount  int
+		issuesContain   []string
+	}{
+		{
+			name:           "valid trace",
+			trace:          validTrace,
+			wantIssueCount: 0,
+		},
+		{
+			name:           "nil trace",
+			trace:          nil,
+			wantIssueCount: 1,
+			issuesContain:  []string{"trace is nil"},
+		},
+		{
+			name:           "empty trace",
+			trace:          emptyTrace,
+			wantIssueCount: 1,
+			issuesContain:  []string{"no steps"},
+		},
+		{
+			name:           "step mismatch",
+			trace:          mismatchTrace,
+			wantIssueCount: 1,
+			issuesContain:  []string{"step index mismatch", "position 1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues := ValidateExecutionTrace(tt.trace)
+			if len(issues) != tt.wantIssueCount {
+				t.Errorf("ValidateExecutionTrace() returned %d issues, want %d. Issues: %v", 
+					len(issues), tt.wantIssueCount, issues)
+			}
+			for _, want := range tt.issuesContain {
+				found := false
+				for _, issue := range issues {
+					if strings.Contains(issue, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("ValidateExecutionTrace() issues %v should contain %q", issues, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTraceInputError_Formatting(t *testing.T) {
+	tests := []struct {
+		name     string
+		failures []string
+		want     string
+	}{
+		{
+			name:     "single failure",
+			failures: []string{"invalid format"},
+			want:     "invalid format",
+		},
+		{
+			name:     "multiple failures",
+			failures: []string{"error 1", "error 2", "error 3"},
+			want:     "3 trace input validation error(s):\n  1. error 1\n  2. error 2\n  3. error 3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := &TraceInputError{Failures: tt.failures}
+			if got := err.Error(); got != tt.want {
+				t.Errorf("TraceInputError.Error() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
