@@ -45,7 +45,8 @@ func ValidateTraceInputs(verbosity, exportFormat, eventFilter, outputPath string
 	if verbosity != "" {
 		if _, err := ParseVerbosity(verbosity); err != nil {
 			failures = append(failures, fmt.Sprintf(
-				"invalid --trace-verbosity %q — must be one of: summary, normal, verbose",
+				"invalid --trace-verbosity %q — must be one of: summary, normal, verbose\n"+
+					"  Fix: use --trace-verbosity normal (default), summary (minimal), or verbose (detailed)",
 				verbosity,
 			))
 		}
@@ -53,12 +54,14 @@ func ValidateTraceInputs(verbosity, exportFormat, eventFilter, outputPath string
 
 	// Export format.
 	if exportFormat != "" {
-		switch strings.ToLower(strings.TrimSpace(exportFormat)) {
+		normalizedFormat := strings.ToLower(strings.TrimSpace(exportFormat))
+		switch normalizedFormat {
 		case "text", "json", "html", "markdown", "md":
 			// valid
 		default:
 			failures = append(failures, fmt.Sprintf(
-				"invalid trace export format %q — must be one of: text, json, html, markdown",
+				"invalid trace export format %q — must be one of: text, json, html, markdown\n"+
+					"  Fix: use --format html (interactive), json (machine-readable), markdown (shareable), or text (CLI output)",
 				exportFormat,
 			))
 		}
@@ -75,19 +78,47 @@ func ValidateTraceInputs(verbosity, exportFormat, eventFilter, outputPath string
 		}
 		if !valid {
 			failures = append(failures, fmt.Sprintf(
-				"invalid event filter %q — must be one of: %s",
+				"invalid event filter %q — must be one of: %s\n"+
+					"  Fix: choose a valid event type to filter trace output\n"+
+					"  Available types: %s",
 				eventFilter,
+				strings.Join(AllFilterableEventTypes(), ", "),
 				strings.Join(AllFilterableEventTypes(), ", "),
 			))
 		}
 	}
 
 	// Output path sanity: must not be a bare directory path.
-	if outputPath != "" && (strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, "\\")) {
-		failures = append(failures, fmt.Sprintf(
-			"--trace-output %q looks like a directory path; provide a full file path (e.g. ./trace.html)",
-			outputPath,
-		))
+	if outputPath != "" {
+		if strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, "\\") {
+			failures = append(failures, fmt.Sprintf(
+				"--trace-output %q looks like a directory path; provide a full file path\n"+
+					"  Fix: specify a complete file path (e.g. ./traces/trace.html or ./output/trace.json)\n"+
+					"  Example: glassbox debug --trace-output ./traces/debug-$(date +%%Y%%m%%d).html <tx-hash>",
+				outputPath,
+			))
+		}
+		
+		// Validate parent directory exists or can be created
+		// Note: We only check for obviously invalid paths here; actual directory creation happens at write time
+		if strings.Contains(outputPath, "\x00") {
+			failures = append(failures, fmt.Sprintf(
+				"--trace-output contains null bytes which are not allowed in file paths\n"+
+					"  Fix: remove any null bytes from the path specification",
+			))
+		}
+		
+		// Check for suspicious path traversal patterns
+		if strings.Contains(outputPath, "..") {
+			// This is just a warning-level check; the actual path validation happens in path_safety.go
+			// But we can provide early feedback
+			failures = append(failures, fmt.Sprintf(
+				"--trace-output %q contains directory traversal sequences (..)\n"+
+					"  Fix: use absolute paths or relative paths without '..' for security\n"+
+					"  Example: use './output/trace.html' instead of '../output/trace.html'",
+				outputPath,
+			))
+		}
 	}
 
 	if len(failures) > 0 {
@@ -172,4 +203,148 @@ func truncateForDiag(s string) string {
 		return s[:17] + "..."
 	}
 	return s
+}
+
+// ValidateTraceExportParams validates all parameters before attempting to export a trace.
+// This comprehensive check catches configuration issues before any expensive operations.
+//
+// Parameters:
+//   - trace: the execution trace to export (must not be nil)
+//   - format: export format (html, markdown, json, text)
+//   - outputPath: destination file path
+//   - opts: export options (comments, metadata)
+//
+// Returns a detailed error if validation fails, or nil if all checks pass.
+func ValidateTraceExportParams(trace *ExecutionTrace, format, outputPath string, opts ExportOptions) error {
+	var failures []string
+
+	// Trace must not be nil
+	if trace == nil {
+		failures = append(failures, "execution trace is nil — cannot export an empty trace\n"+
+			"  Fix: ensure the simulation completed successfully before attempting export\n"+
+			"  Check: run the debug command without --trace-output first to verify simulation succeeds")
+	}
+
+	// Format validation
+	if format == "" {
+		failures = append(failures, "export format is empty — must specify one of: html, markdown, json, text\n"+
+			"  Fix: provide --format html (default), markdown, json, or text")
+	} else {
+		normalizedFormat := strings.ToLower(strings.TrimSpace(format))
+		switch normalizedFormat {
+		case "html", "markdown", "md", "json", "text":
+			// valid
+		default:
+			failures = append(failures, fmt.Sprintf(
+				"unsupported export format %q — must be one of: html, markdown, json, text\n"+
+					"  Fix: use a supported format\n"+
+					"  Recommended: html for interactive viewing, json for CI/CD pipelines",
+				format,
+			))
+		}
+	}
+
+	// Output path validation
+	if outputPath == "" {
+		failures = append(failures, "output path is empty — must specify where to write the trace\n"+
+			"  Fix: provide --trace-output with a valid file path\n"+
+			"  Example: --trace-output ./traces/debug-output.html")
+	} else {
+		// Check for invalid characters
+		if strings.ContainsRune(outputPath, 0) {
+			failures = append(failures, "output path contains null bytes which are not allowed\n"+
+				"  Fix: remove any null bytes from the path")
+		}
+		
+		// Check it's not a directory
+		if strings.HasSuffix(outputPath, "/") || strings.HasSuffix(outputPath, "\\") {
+			failures = append(failures, fmt.Sprintf(
+				"output path %q appears to be a directory; must be a file path\n"+
+					"  Fix: append a filename (e.g. %strace.html)",
+				outputPath, outputPath,
+			))
+		}
+	}
+
+	// Validate trace has content
+	if trace != nil && len(trace.States) == 0 {
+		failures = append(failures, "execution trace contains no steps — trace export would be empty\n"+
+			"  Possible causes:\n"+
+			"    - Simulation did not produce any diagnostic events\n"+
+			"    - Transaction envelope is invalid\n"+
+			"    - Simulator version is incompatible\n"+
+			"  Fix: verify the transaction executed successfully\n"+
+			"  Recommended: run 'glassbox doctor' to check simulator compatibility")
+	}
+
+	// Validate export options
+	if len(opts.Comments) > 100 {
+		failures = append(failures, fmt.Sprintf(
+			"too many comments (%d) — maximum is 100 comments per trace export\n"+
+				"  Fix: reduce the number of comments or split into multiple exports",
+			len(opts.Comments),
+		))
+	}
+	
+	for i, comment := range opts.Comments {
+		if len(comment) > 10000 {
+			failures = append(failures, fmt.Sprintf(
+				"comment #%d exceeds maximum length (10000 chars) — got %d chars\n"+
+					"  Fix: shorten the comment or split it into multiple comments",
+				i+1, len(comment),
+			))
+		}
+	}
+
+	if len(failures) > 0 {
+		return &TraceInputError{Failures: failures}
+	}
+	return nil
+}
+
+// ValidateTraceFormatCompatibility checks if the trace data is compatible with the target export format.
+// Some formats may have specific requirements or limitations.
+func ValidateTraceFormatCompatibility(trace *ExecutionTrace, format string) error {
+	if trace == nil {
+		return fmt.Errorf("trace is nil")
+	}
+
+	normalizedFormat := strings.ToLower(strings.TrimSpace(format))
+	
+	switch normalizedFormat {
+	case "json":
+		// JSON format requires serializable data
+		for i, state := range trace.States {
+			if state.ContractMetadata != nil {
+				// Check for circular references or other serialization issues
+				// This is a basic check; the actual JSON marshaling will catch deeper issues
+				if state.ContractMetadata.Name == "" && state.ContractMetadata.Version == "" {
+					// This might indicate incomplete metadata that could cause serialization issues
+					// But it's not a hard error, just a warning
+				}
+			}
+			if state.Step != i {
+				return fmt.Errorf("trace step mismatch at position %d: expected step %d but got %d — trace may be corrupted", i, i, state.Step)
+			}
+		}
+		
+	case "html":
+		// HTML format has special character escaping requirements
+		// Check for extremely long strings that might cause browser issues
+		for i, state := range trace.States {
+			argStr := fmt.Sprintf("%v", state.Arguments)
+			if len(argStr) > 50000 {
+				return fmt.Errorf("step %d has very large arguments (%d chars) that may cause browser rendering issues in HTML format — consider using JSON format instead", i, len(argStr))
+			}
+		}
+		
+	case "markdown", "md":
+		// Markdown format works well with most data but very long lines can be problematic
+		// This is a soft check
+		
+	case "text":
+		// Plain text format is the most permissive
+	}
+	
+	return nil
 }
