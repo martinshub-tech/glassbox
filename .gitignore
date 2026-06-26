@@ -64,6 +64,7 @@ lishus-t.md
 lishus.md
 PR_30*
 PR_279_trace_export_audit_chain_integrity.md
+PR_280_trace_export_schema_stability.md
 commit_309*.next
 *.py
 !emojis.py

@@ -380,7 +380,7 @@ Performance notes:
 			if traceShowTimingFlag {
 				jsonStart = time.Now()
 			}
-			jsonData, err := executionTrace.ExportJSON("1.0", time.Now())
+			jsonData, err := executionTrace.ExportJSON(trace.CurrentJSONSchemaVersion, time.Now())
 			if err != nil {
 				return errors.WrapValidationError(fmt.Sprintf(
 					"failed to serialize trace as JSON: %v\n"+

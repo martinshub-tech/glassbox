@@ -302,6 +302,75 @@ func ValidateTraceExportParams(trace *ExecutionTrace, format, outputPath string,
 	return nil
 }
 
+// ValidateJSONSchemaVersion validates a schema_version string as found in the
+// ExportJSON envelope produced by --output-json. It rejects empty, malformed
+// (not MAJOR.MINOR), or unsupported version strings with actionable messages.
+//
+// This is a pure-function validator suitable for use in PreRunE or any point
+// where a schema version string is known before file I/O begins.
+func ValidateJSONSchemaVersion(version string) error {
+	if strings.TrimSpace(version) == "" {
+		return &TraceInputError{Failures: []string{
+			"schema_version is empty — a valid version string is required\n" +
+				"  Expected format: \"MAJOR.MINOR\" (e.g. \"1.0\")\n" +
+				"  Fix: use the current schema version: \"" + CurrentJSONSchemaVersion + "\"",
+		}}
+	}
+
+	// Must match MAJOR.MINOR pattern (digits only, exactly two components).
+	parts := strings.Split(version, ".")
+	if len(parts) != 2 {
+		return &TraceInputError{Failures: []string{fmt.Sprintf(
+			"schema_version %q is not in MAJOR.MINOR format\n"+
+				"  Expected a two-component version string (e.g. \"1.0\")\n"+
+				"  Fix: use the current schema version: %q",
+			version, CurrentJSONSchemaVersion,
+		)}}
+	}
+	for _, p := range parts {
+		if len(p) == 0 {
+			return &TraceInputError{Failures: []string{fmt.Sprintf(
+				"schema_version %q contains an empty component\n"+
+					"  Fix: use a valid version such as %q",
+				version, CurrentJSONSchemaVersion,
+			)}}
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return &TraceInputError{Failures: []string{fmt.Sprintf(
+					"schema_version %q contains non-numeric characters\n"+
+						"  Expected: digits only (e.g. \"1.0\")\n"+
+						"  Fix: use a valid schema version such as %q",
+					version, CurrentJSONSchemaVersion,
+				)}}
+			}
+		}
+	}
+
+	if !IsJSONSchemaVersionSupported(version) {
+		return &TraceInputError{Failures: []string{fmt.Sprintf(
+			"schema_version %q is not supported by this version of Glassbox\n"+
+				"  Supported versions: %s\n"+
+				"  Fix: re-export the trace with the current CLI, which produces schema version %q\n"+
+				"  Tip: run 'glassbox trace --output-json <file> <trace-file>' to re-export",
+			version,
+			joinSupportedVersions(),
+			CurrentJSONSchemaVersion,
+		)}}
+	}
+
+	return nil
+}
+
+// joinSupportedVersions formats SupportedJSONSchemaVersions for error messages.
+func joinSupportedVersions() string {
+	parts := make([]string, len(SupportedJSONSchemaVersions))
+	for i, v := range SupportedJSONSchemaVersions {
+		parts[i] = fmt.Sprintf("%q", v)
+	}
+	return strings.Join(parts, ", ")
+}
+
 // ValidateTraceFormatCompatibility checks if the trace data is compatible with the target export format.
 // Some formats may have specific requirements or limitations.
 func ValidateTraceFormatCompatibility(trace *ExecutionTrace, format string) error {

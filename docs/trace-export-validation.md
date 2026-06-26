@@ -373,6 +373,26 @@ cannot specify both --export and --print
 
 **Validation:**
 - Path must not end with `/` or `\`
+- Produces a deterministic JSON envelope with `schema_version`, `generated_at`, and a nested `trace` object
+
+**Schema version:**
+The output envelope always embeds the current `schema_version` (e.g. `"1.0"`). The version is defined by the `CurrentJSONSchemaVersion` constant in the trace package — it is never hardcoded at call sites, so all paths stay in sync automatically when the schema evolves.
+
+**Loading files back:**
+`glassbox trace <file>` can load files written by `--output-json`. The loader detects the `schema_version` string envelope and validates it before parsing:
+
+```
+unsupported schema_version "99.0" in trace file "trace.json"
+  This binary supports schema versions: "1.0"
+  Fix: re-export the trace with the current CLI version, or upgrade Glassbox
+```
+
+Files written by a slightly older minor version produce a deprecation warning but load successfully:
+
+```
+Warning: trace file "old-trace.json" uses schema_version "0.9"; current is "1.0"
+  Consider re-exporting with the current CLI for full compatibility
+```
 
 ### `--export-svg`
 
@@ -467,6 +487,77 @@ trace file is required
   Or:    glassbox trace --file <trace-file>
   Run 'glassbox trace --help' for all available options
 ```
+
+---
+
+## Schema Stability and Upgrades
+
+The `--output-json` flag produces a structured envelope with an explicit `schema_version` field. This section explains how Glassbox handles schema versioning, loading older files, and detecting incompatible versions.
+
+### Schema Version Format
+
+Schema versions use `MAJOR.MINOR` notation (e.g. `"1.0"`):
+
+- **MAJOR** changes indicate breaking structural changes to the envelope or field layouts. Files from a different major version cannot be loaded.
+- **MINOR** changes add new optional fields. Files from older minor versions load with a deprecation warning. Files from newer minor versions that are explicitly listed in `SupportedJSONSchemaVersions` also load successfully.
+
+The current schema version constant is `CurrentJSONSchemaVersion = "1.0"`.
+
+### Two JSON Envelope Formats
+
+Glassbox uses two different JSON shapes depending on the export path:
+
+| Flag | Envelope shape | Version field |
+|------|----------------|---------------|
+| `--output-json` | `{"schema_version":"1.0","generated_at":"...","trace":{...}}` | String: `"1.0"` |
+| `--export --format json` | `{"version":{"major":1,"minor":0,"patch":0},"trace":{...}}` | Semver object |
+
+`glassbox trace` detects and handles both shapes automatically. The detection is done by probing for the `schema_version` string key (ExportJSON shape) versus the `version` object key (VersionedTrace shape).
+
+### Unsupported Schema Version Error
+
+```
+unsupported schema_version "99.0" in trace file "trace.json"
+  This binary supports schema versions: "1.0"
+  Fix: re-export the trace with the current CLI version, or upgrade Glassbox
+```
+
+### Older Minor Version Warning
+
+```
+Warning: trace file "old-trace.json" uses schema_version "0.9"; current is "1.0"
+  Consider re-exporting with the current CLI for full compatibility
+```
+
+### Legacy File Warning (No Envelope)
+
+Files produced before the schema envelope was introduced load with a warning:
+
+```
+Warning: loaded legacy trace format (no version info)
+  Consider re-exporting with current version for full compatibility
+```
+
+### ExportJSON Schema Validation Function
+
+`ValidateJSONSchemaVersion(version string) error` can be called independently to validate any schema version string before file I/O. It rejects:
+
+- Empty or whitespace-only strings
+- Strings not in `MAJOR.MINOR` format
+- Non-numeric components
+- Version strings not present in `SupportedJSONSchemaVersions`
+
+All errors include a `Fix:` hint and reference the current expected version.
+
+---
+
+## See Also
+
+- [Debug Command Reference](./debug-command.md)
+- [Trace Export Annotations](./trace-export-annotations.md)
+- [Trace Profiling and Performance](./trace-profiling.md)
+- [Event Schemas](./event-schemas.md)
+- [JSON Output Format](./json-output.md)
 
 ---
 
