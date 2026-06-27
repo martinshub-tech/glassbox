@@ -78,15 +78,23 @@ func LoadAliasConfig(path string) (AliasMap, error) {
 		return nil, fmt.Errorf("alias: parse config %s: %w", path, err)
 	}
 
+	configDir := filepath.Dir(path)
 	for alias, target := range m {
-		trimmedAlias := strings.TrimSpace(alias)
-		trimmedTarget := strings.TrimSpace(target)
-		if trimmedAlias == "" {
-			return nil, fmt.Errorf("alias: read config %s: empty alias name", path)
+		if target == "" {
+			continue
 		}
-		if trimmedTarget == "" {
-			return nil, fmt.Errorf("alias: read config %s: empty target path for alias %q", path, trimmedAlias)
+		resolved := target
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Clean(filepath.Join(configDir, resolved))
 		}
+		info, statErr := os.Stat(resolved)
+		if statErr != nil {
+			return nil, fmt.Errorf("alias: target for %q must point to an existing directory: %q: %w", alias, resolved, statErr)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("alias: target for %q must point to an existing directory: %q", alias, resolved)
+		}
+		m[alias] = resolved
 	}
 	return m, nil
 }

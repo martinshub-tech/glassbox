@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dotandev/glassbox/internal/rpc"
+	"github.com/dotandev/glassbox/internal/sourcemap"
 	"github.com/dotandev/glassbox/internal/trace"
 	"github.com/spf13/cobra"
 )
@@ -193,7 +194,7 @@ func runDebugDryRun(cmd *cobra.Command, txHash string) error {
 		}
 	}
 
-	// Source alias pre-flight: validate JSON when --source-alias is set.
+	// Source alias pre-flight: validate JSON and target directories when --source-alias is set.
 	if sourceAliasFlag != "" {
 		aliasBytes, readErr := os.ReadFile(sourceAliasFlag)
 		if readErr != nil {
@@ -208,25 +209,11 @@ func runDebugDryRun(cmd *cobra.Command, txHash string) error {
 					"       Fix: ensure the file is a flat JSON object\n"+
 					"       Example: {\"my_crate\": \"/path/to/my_crate/src\"}\n", sourceAliasFlag, jsonErr)
 			} else {
-				for alias, target := range aliasMap {
-					trimmedAlias := strings.TrimSpace(alias)
-					trimmedTarget := strings.TrimSpace(target)
-					if trimmedAlias == "" {
-						failures = append(failures, fmt.Sprintf("source-alias: empty alias in %q", sourceAliasFlag))
-						fmt.Fprintf(errOut, "[FAIL] --source-alias: %q contains an empty alias name\n"+
-							"       Fix: provide a non-empty alias name for each mapping\n", sourceAliasFlag)
-						continue
-					}
-					if trimmedTarget == "" {
-						failures = append(failures, fmt.Sprintf("source-alias: empty target for alias %q in %q", trimmedAlias, sourceAliasFlag))
-						fmt.Fprintf(errOut, "[FAIL] --source-alias: alias %q maps to an empty path\n"+
-							"       Fix: provide a real local directory path for each alias target\n", trimmedAlias)
-						continue
-					}
-					if _, targetErr := os.Stat(trimmedTarget); targetErr != nil {
-						fmt.Fprintf(errOut, "       Warning: source-alias target for %q does not exist: %q\n",
-							trimmedAlias, trimmedTarget)
-					}
+				if _, err := sourcemap.LoadAliasConfig(sourceAliasFlag); err != nil {
+					failures = append(failures, fmt.Sprintf("source-alias: %v", err))
+					fmt.Fprintf(errOut, "[FAIL] --source-alias validation failed: %v\n", err)
+				} else {
+					fmt.Fprintf(out, "[OK]   Source alias file: %s (%d mapping(s))\n", sourceAliasFlag, len(aliasMap))
 				}
 				fmt.Fprintf(out, "[OK]   Source alias file: %s (%d mapping(s))\n", sourceAliasFlag, len(aliasMap))
 			}

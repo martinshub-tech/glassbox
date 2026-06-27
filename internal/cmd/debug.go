@@ -2548,40 +2548,34 @@ func validateSourceDiscoveryFlags() error {
 		}
 	}
 
-	// --source-alias must be readable valid JSON.
+	// --source-alias must be readable valid JSON and point to existing directories.
 	if sourceAliasFlag != "" {
 		aliasBytes, readErr := os.ReadFile(sourceAliasFlag)
-		if readErr == nil {
-			var aliasMap map[string]string
-			if jsonErr := json.Unmarshal(aliasBytes, &aliasMap); jsonErr != nil {
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
 				return errors.WrapValidationError(fmt.Sprintf(
-					"--source-alias: failed to parse %q as JSON: %v\n"+
-						"  The file must be a flat JSON object mapping alias strings to local paths.\n"+
+					"--source-alias: file not found: %q\n"+
+						"  Provide a JSON file mapping embedded source paths to local filesystem paths.\n"+
 						"  Example: {\"my_crate\": \"/path/to/my_crate/src\"}",
-					sourceAliasFlag, jsonErr,
+					sourceAliasFlag,
 				))
 			}
-			for alias, target := range aliasMap {
-				trimmedAlias := strings.TrimSpace(alias)
-				trimmedTarget := strings.TrimSpace(target)
-				if trimmedAlias == "" {
-					return errors.WrapValidationError(fmt.Sprintf(
-						"--source-alias: %q contains an empty alias name\n"+
-							"  Each alias must be a non-empty string mapping to a local directory path.",
-						sourceAliasFlag,
-					))
-				}
-				if trimmedTarget == "" {
-					return errors.WrapValidationError(fmt.Sprintf(
-						"--source-alias: %q maps alias %q to an empty path\n"+
-							"  Provide a real local directory path for each alias target.",
-						sourceAliasFlag, trimmedAlias,
-					))
-				}
-			}
+			return errors.WrapValidationError(fmt.Sprintf(
+				"--source-alias: cannot read %q: %v", sourceAliasFlag, readErr,
+			))
 		}
-		// File-not-found is handled by validateFilePath upstream;
-		// we only re-parse here to catch truncated/corrupt JSON files.
+		var aliasMap map[string]string
+		if jsonErr := json.Unmarshal(aliasBytes, &aliasMap); jsonErr != nil {
+			return errors.WrapValidationError(fmt.Sprintf(
+				"--source-alias: failed to parse %q as JSON: %v\n"+
+					"  The file must be a flat JSON object mapping alias strings to local paths.\n"+
+					"  Example: {\"my_crate\": \"/path/to/my_crate/src\"}",
+				sourceAliasFlag, jsonErr,
+			))
+		}
+		if _, err := sourcemap.LoadAliasConfig(sourceAliasFlag); err != nil {
+			return errors.WrapValidationError(fmt.Sprintf("--source-alias: %v", err))
+		}
 	}
 
 	return nil
