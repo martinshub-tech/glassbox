@@ -141,6 +141,32 @@ func (s *Store) initSchema() error {
 	return nil
 }
 
+// columnExists checks if a column exists in a table.
+func (s *Store) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, fmt.Errorf("failed to inspect %s schema: %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue interface{}
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return false, fmt.Errorf("failed to scan %s schema: %w", table, err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
 func (s *Store) ensureColumn(table, column, definition string) error {
 	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {

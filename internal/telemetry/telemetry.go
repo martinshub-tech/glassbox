@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Config holds OpenTelemetry configuration
@@ -54,10 +55,10 @@ var (
 // silentSpanExporter wraps a SpanExporter and swallows all export errors so
 // collector outages never block or log. Core SDK paths must not depend on telemetry.
 type silentSpanExporter struct {
-	delegate trace.SpanExporter
+	delegate sdktrace.SpanExporter
 }
 
-func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []trace.ReadOnlySpan) error {
+func (s *silentSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	_ = s.delegate.ExportSpans(ctx, spans)
 	return nil
 }
@@ -96,7 +97,7 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	)
 	if err != nil {
 		// Collector unreachable at init: use no-op so core paths are unaffected
-		otel.SetTracerProvider(trace.NewTracerProvider())
+		otel.SetTracerProvider(sdktrace.NewTracerProvider())
 		return func() {}, nil
 	}
 
@@ -109,7 +110,7 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	)
 	if err != nil {
 		_ = exporter.Shutdown(ctx)
-		otel.SetTracerProvider(trace.NewTracerProvider())
+		otel.SetTracerProvider(sdktrace.NewTracerProvider())
 		return func() {}, nil
 	}
 
@@ -117,9 +118,9 @@ func Init(ctx context.Context, config Config) (func(), error) {
 	silent := &silentSpanExporter{delegate: exporter}
 
 	// Create trace provider with silent exporter so collector downtime doesn't block or log
-	tp := trace.NewTracerProvider(
-		trace.WithBatcher(silent),
-		trace.WithResource(res),
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(silent),
+		sdktrace.WithResource(res),
 	)
 
 	otel.SetTracerProvider(tp)
